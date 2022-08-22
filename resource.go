@@ -19,7 +19,9 @@ type ResourceEntity interface {
 }
 
 type DbBroker interface {
-	Open() (*sql.DB, error)
+	// Open creates a database connection against databaseName
+	// If databaseName is empty, uses Connection URL from database broker
+	Open(databaseName string) (*sql.DB, error)
 }
 
 type Resource[T ResourceEntity] struct {
@@ -40,7 +42,14 @@ func (r Resource[T]) Create(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r.op(w, req, func(db *sql.DB) (*T, error) {
+	db, err := r.Db.Open("")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error connecting to db: %s", err), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	r.Op(w, req, func() (*T, error) {
 		if tempPayload.UseExisting {
 			return &payload, payload.Ensure(db)
 		}
@@ -53,7 +62,14 @@ func (r Resource[T]) Get(w http.ResponseWriter, req *http.Request) {
 	var data T
 	data.SetId(vars[r.IdPathParameter])
 
-	r.op(w, req, func(db *sql.DB) (*T, error) {
+	db, err := r.Db.Open("")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error connecting to db: %s", err), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	r.Op(w, req, func() (*T, error) {
 		if err := data.Read(db); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
@@ -72,7 +88,14 @@ func (r Resource[T]) Update(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	data.SetId(vars[r.IdPathParameter])
 
-	r.op(w, req, func(db *sql.DB) (*T, error) {
+	db, err := r.Db.Open("")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error connecting to db: %s", err), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	r.Op(w, req, func() (*T, error) {
 		if ok, err := data.Exists(db); err != nil {
 			return nil, err
 		} else if !ok {
@@ -99,7 +122,14 @@ func (r Resource[T]) Delete(w http.ResponseWriter, req *http.Request) {
 	var data T
 	data.SetId(vars[r.IdPathParameter])
 
-	r.op(w, req, func(db *sql.DB) (*T, error) {
+	db, err := r.Db.Open("")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("error connecting to db: %s", err), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	r.Op(w, req, func() (*T, error) {
 		if err := data.Drop(db); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
@@ -110,15 +140,8 @@ func (r Resource[T]) Delete(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-func (r Resource[T]) op(w http.ResponseWriter, req *http.Request, fn func(db *sql.DB) (*T, error)) {
-	db, err := r.Db.Open()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("error connecting to db: %s", err), http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	result, err := fn(db)
+func (r Resource[T]) Op(w http.ResponseWriter, req *http.Request, fn func() (*T, error)) {
+	result, err := fn()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	} else if result == nil {
