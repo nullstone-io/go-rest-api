@@ -6,10 +6,22 @@ import (
 	"net/http"
 )
 
+type ResourceKeyParserFunc[T any] func(r *http.Request) (T, error)
+
+func PathParameterKeyParser(attr string) ResourceKeyParserFunc[string] {
+	return func(r *http.Request) (string, error) {
+		return mux.Vars(r)[attr], nil
+	}
+}
+
 type Resource[TKey any, T any] struct {
 	DataAccess DataAccess[TKey, T]
-	// The path parameter (i.e. {id}) contained in the path identifying the resource
-	IdPathParameter string
+
+	// KeyParser allows the resource to parse the unique key from the request
+	KeyParser ResourceKeyParserFunc[TKey]
+
+	// BeforeExec allows the resource to introspect the request and adjust the input payload
+	BeforeExec func(r *http.Request, obj *T)
 }
 
 func (r Resource[TKey, T]) Create(w http.ResponseWriter, req *http.Request) {
@@ -25,6 +37,9 @@ func (r Resource[TKey, T]) Create(w http.ResponseWriter, req *http.Request) {
 	}
 
 	r.Op(w, req, func() (*T, error) {
+		if r.BeforeExec != nil {
+			r.BeforeExec(req, &payload)
+		}
 		if tempPayload.UseExisting {
 			return r.DataAccess.Ensure(payload)
 		}
@@ -33,8 +48,7 @@ func (r Resource[TKey, T]) Create(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r Resource[TKey, T]) Get(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	key, err := r.DataAccess.ParseKey(vars[r.IdPathParameter])
+	key, err := r.KeyParser(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -46,24 +60,26 @@ func (r Resource[TKey, T]) Get(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r Resource[TKey, T]) Update(w http.ResponseWriter, req *http.Request) {
-	data, ok := DecodeBody[T](w, req)
+	payload, ok := DecodeBody[T](w, req)
 	if !ok {
 		return
 	}
-	vars := mux.Vars(req)
-	key, err := r.DataAccess.ParseKey(vars[r.IdPathParameter])
+	key, err := r.KeyParser(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	r.Op(w, req, func() (*T, error) {
-		if ok, err := r.DataAccess.Exists(data); err != nil {
+		if r.BeforeExec != nil {
+			r.BeforeExec(req, &payload)
+		}
+		if ok, err := r.DataAccess.Exists(payload); err != nil {
 			return nil, err
 		} else if !ok {
 			return nil, nil
 		}
-		return r.DataAccess.Update(key, data)
+		return r.DataAccess.Update(key, payload)
 	})
 }
 
@@ -80,8 +96,7 @@ func (r Resource[TKey, T]) Delete(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	vars := mux.Vars(req)
-	key, err := r.DataAccess.ParseKey(vars[r.IdPathParameter])
+	key, err := r.KeyParser(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
