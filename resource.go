@@ -29,19 +29,10 @@ func (r Resource[TKey, T]) Create(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	tempPayload, ok := DecodeBody[struct {
-		UseExisting bool `json:"useExisting"`
-	}](w, req)
-	if !ok {
-		return
-	}
 
 	r.Op(w, req, func() (*T, error) {
 		if r.BeforeExec != nil {
 			r.BeforeExec(req, &payload)
-		}
-		if tempPayload.UseExisting {
-			return r.DataAccess.Ensure(payload)
 		}
 		return r.DataAccess.Create(payload)
 	})
@@ -73,11 +64,6 @@ func (r Resource[TKey, T]) Update(w http.ResponseWriter, req *http.Request) {
 	r.Op(w, req, func() (*T, error) {
 		if r.BeforeExec != nil {
 			r.BeforeExec(req, &payload)
-		}
-		if ok, err := r.DataAccess.Exists(payload); err != nil {
-			return nil, err
-		} else if !ok {
-			return nil, nil
 		}
 		return r.DataAccess.Update(key, payload)
 	})
