@@ -70,18 +70,6 @@ func (r Resource[TKey, T]) Update(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r Resource[TKey, T]) Delete(w http.ResponseWriter, req *http.Request) {
-	tempPayload, ok := DecodeBody[struct {
-		SkipDestroy bool `json:"skipDestroy"`
-	}](w, req)
-	if !ok {
-		return
-	}
-
-	if tempPayload.SkipDestroy {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
 	key, err := r.KeyParser(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
